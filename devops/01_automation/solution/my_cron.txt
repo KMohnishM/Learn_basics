@@ -1,0 +1,7 @@
+# To run the script every 5 minutes, your crontab entry should look exactly like this:
+# 
+# Syntax: Minute Hour DayOfMonth Month DayOfWeek Command
+
+*/5 * * * * /absolute/path/to/your/exercise/check_cpu.sh
+
+# The '*/5' means "every 5th minute". The rest of the stars mean "every hour, every day, etc."
