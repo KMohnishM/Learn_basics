@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+spec:
+  # type: ClusterIP is the default! It means this service is only accessible
+  # from within the Kubernetes cluster.
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379

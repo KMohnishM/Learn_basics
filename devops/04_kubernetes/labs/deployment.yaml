@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-api-deployment
+  labels:
+    app: python-api
+spec:
+  # Desired state: I want 3 copies of this pod running at all times.
+  replicas: 3
+  
+  # How the deployment finds the pods it is supposed to manage
+  selector:
+    matchLabels:
+      app: python-api
+      
+  # The blueprint for creating the Pods
+  template:
+    metadata:
+      labels:
+        app: python-api
+    spec:
+      containers:
+      - name: python-api
+        # We are using the image we built in Module 2!
+        image: my-python-api:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        
+        # Resource requests and limits (using cgroups under the hood!)
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "250m"
+          limits:
+            memory: "128Mi"
+            cpu: "500m"

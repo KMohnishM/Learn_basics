@@ -1,0 +1,22 @@
+version: '3.8'
+
+# Services define the different containers we want to run
+services:
+  # 1. Our custom Python API
+  api:
+    build: .             # Build the Dockerfile in the current directory
+    # We don't expose ports directly to the host here. 
+    # We want traffic to go through Nginx first!
+    restart: always
+
+  # 2. Nginx Reverse Proxy
+  proxy:
+    image: nginx:alpine  # Use the official lightweight Nginx image
+    ports:
+      - "8080:80"        # Map host port 8080 to container port 80
+    volumes:
+      # Mount our custom nginx.conf inside the container
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api              # Make sure the API starts before Nginx
+    restart: always

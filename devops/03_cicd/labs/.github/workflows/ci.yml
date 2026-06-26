@@ -1,0 +1,59 @@
+name: Python CI Pipeline
+
+# 1. Events: When should this pipeline run?
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# 2. Jobs: The actual work to be done
+jobs:
+  # Job 1: Test the code
+  test:
+    runs-on: ubuntu-latest # The runner (VM) to use
+    
+    steps:
+    # Step 1: Check out the repository code onto the runner
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Step 2: Install Python
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.9"
+
+    # Step 3: Install dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    # Step 4: Run a Linter (checks for syntax/style errors)
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+    # Step 5: Run Unit Tests
+    # (Assuming we have a test_app.py file)
+    - name: Test with pytest
+      run: |
+        pytest
+
+  # Job 2: Build the Docker Image
+  build:
+    # This job 'needs' the test job to succeed before it will start!
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Build Docker image
+      run: |
+        docker build -t my-python-api:latest .
+        echo "Docker image successfully built!"
