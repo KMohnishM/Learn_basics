@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  # 1. Prometheus - The Metrics Scraper and Database
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      # We mount our custom config file into the container
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090" # Prometheus web UI
+
+  # 2. Grafana - The Visualization Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000" # Grafana web UI
+    environment:
+      # Set default admin password
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus

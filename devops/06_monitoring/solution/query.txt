@@ -1,0 +1,8 @@
+# The PromQL query to calculate the rate of 500 errors over the last 5 minutes:
+
+rate(http_requests_total{status="500"}[5m])
+
+# How it works:
+# 1. http_requests_total{status="500"} filters the metric to only show server errors.
+# 2. [5m] grabs the data points from the last 5 minutes.
+# 3. rate() calculates the per-second average increase over that 5-minute window.

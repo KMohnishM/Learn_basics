@@ -1,0 +1,17 @@
+name: Capstone CI
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Build Docker image
+      run: |
+        # Build the image using the Dockerfile in the root
+        docker build -t capstone-api:latest .
+        echo "Build successful!"
