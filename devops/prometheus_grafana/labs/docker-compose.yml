@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # ===========================================================
+  # 1. YOUR INSTRUMENTED PYTHON APP
+  # ===========================================================
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  # ===========================================================
+  # 2. PROMETHEUS
+  # Scrapes /metrics from our app and stores the time series data
+  # ===========================================================
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    ports:
+      - "9090:9090"
+    volumes:
+      # Mount our custom config and alerting rules
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./alert_rules.yml:/etc/prometheus/alert_rules.yml
+      # Persist data so it survives container restarts
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  # ===========================================================
+  # 3. GRAFANA
+  # Beautiful dashboards on top of Prometheus data
+  # ===========================================================
+  grafana:
+    image: grafana/grafana:10.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=devops123
+      # Auto-configure the Prometheus data source on startup!
+      - GF_DATASOURCES_DEFAULT_NAME=Prometheus
+    volumes:
+      # Persist dashboards and settings
+      - grafana_data:/var/lib/grafana
+      # Automatically provision the Prometheus data source
+      - ./grafana-provisioning/:/etc/grafana/provisioning/
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # ===========================================================
+  # 4. ALERTMANAGER
+  # Routes and sends alert notifications
+  # ===========================================================
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    restart: unless-stopped
+
+# Named volumes for data persistence
+volumes:
+  prometheus_data:
+  grafana_data:

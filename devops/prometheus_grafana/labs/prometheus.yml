@@ -1,0 +1,28 @@
+global:
+  scrape_interval:     15s  # Pull metrics from targets every 15 seconds
+  evaluation_interval: 15s  # Evaluate alerting rules every 15 seconds
+
+# Reference to alertmanager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load alerting rules from separate files
+rule_files:
+  - "alert_rules.yml"
+
+# The actual targets Prometheus will scrape
+scrape_configs:
+  # Prometheus scrapes ITSELF so you can monitor the monitoring system
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Our instrumented Python application
+  - job_name: 'python-api'
+    scrape_interval: 5s   # Override global interval - scrape this one more often
+    static_configs:
+      - targets: ['app:5000']  # "app" is the Docker Compose service name
+    metrics_path: '/metrics'   # This is the default, but shown here for clarity

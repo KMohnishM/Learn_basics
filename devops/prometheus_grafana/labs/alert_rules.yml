@@ -1,0 +1,49 @@
+groups:
+  - name: python_api_alerts
+    rules:
+
+      # -------------------------------------------------------
+      # Alert 1: High error rate
+      # Fires if more than 10% of requests are 5xx errors
+      # -------------------------------------------------------
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m])) > 0.10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+          description: "{{ $value | humanizePercentage }} of requests are failing (threshold: 10%)"
+
+      # -------------------------------------------------------
+      # Alert 2: High p99 latency
+      # Fires if the 99th percentile request latency exceeds 1 second
+      # -------------------------------------------------------
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p99 latency on {{ $labels.endpoint }}"
+          description: "p99 latency is {{ $value | humanizeDuration }} on endpoint {{ $labels.endpoint }}"
+
+      # -------------------------------------------------------
+      # Alert 3: Service is completely down
+      # Fires immediately if Prometheus cannot reach a target
+      # -------------------------------------------------------
+      - alert: ServiceDown
+        expr: up{job="python-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Python API is DOWN"
+          description: "Prometheus cannot scrape the Python API. It has been down for > 1 minute."

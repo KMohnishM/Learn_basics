@@ -1,0 +1,36 @@
+route:
+  # Default receiver - where to send alerts that don't match any specific route
+  receiver: 'slack-notifications'
+  
+  # Group alerts by these labels so you don't get 100 separate notifications
+  group_by: ['alertname', 'job']
+  
+  # Wait 30s before sending the first notification (to batch multiple alerts)
+  group_wait: 30s
+  
+  # Wait 5m before sending a repeated notification for the same alert group
+  group_interval: 5m
+  
+  # Repeat a firing alert every 4 hours
+  repeat_interval: 4h
+
+  # Specific routing rules (child routes)
+  routes:
+    # Critical alerts go to a different, more urgent channel
+    - match:
+        severity: critical
+      receiver: 'pagerduty-critical'
+
+receivers:
+  # Slack notification (you would fill in the webhook URL from Slack settings)
+  - name: 'slack-notifications'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#devops-alerts'
+        title: '{{ template "slack.default.title" . }}'
+        text: '{{ template "slack.default.text" . }}'
+
+  # PagerDuty for critical on-call alerts
+  - name: 'pagerduty-critical'
+    pagerduty_configs:
+      - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY'
