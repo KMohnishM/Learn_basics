@@ -1,0 +1,48 @@
+name: 'ecommerce_dbt'
+version: '1.0.0'
+config-version: 2
+
+# Profile name (must match a profile in ~/.dbt/profiles.yml)
+profile: 'ecommerce_dbt'
+
+# Paths where dbt looks for project resources
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+
+# Files to always run first (before any models)
+# Usually empty; use sources/seeds for initial data
+on-run-start:
+  - "CREATE SCHEMA IF NOT EXISTS staging"
+  - "CREATE SCHEMA IF NOT EXISTS marts"
+
+# Default configuration for all models
+# Can be overridden at folder or model level using config() block
+models:
+  ecommerce_dbt:
+    # Staging models: simple views (lightweight, always fresh)
+    staging:
+      +materialized: view
+      +schema: staging
+
+    # Mart models: physical tables (fast queries for BI tools)
+    marts:
+      +materialized: table
+      +schema: marts
+
+# Seed configuration
+seeds:
+  ecommerce_dbt:
+    country_codes:
+      +column_types:
+        code: varchar(2)
+        name: varchar(100)
+        region: varchar(50)
+
+# Variables: can be overridden at runtime with --vars 'key: value'
+vars:
+  start_date: '2024-01-01'
+  currency: 'USD'

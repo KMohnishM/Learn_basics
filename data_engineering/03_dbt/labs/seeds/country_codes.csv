@@ -1,0 +1,35 @@
+code,name,region
+US,United States,North America
+CA,Canada,North America
+MX,Mexico,North America
+BR,Brazil,South America
+AR,Argentina,South America
+CO,Colombia,South America
+GB,United Kingdom,Europe
+DE,Germany,Europe
+FR,France,Europe
+IT,Italy,Europe
+ES,Spain,Europe
+NL,Netherlands,Europe
+SE,Sweden,Europe
+NO,Norway,Europe
+CH,Switzerland,Europe
+PL,Poland,Europe
+PT,Portugal,Europe
+AU,Australia,Oceania
+NZ,New Zealand,Oceania
+IN,India,Asia
+JP,Japan,Asia
+CN,China,Asia
+KR,South Korea,Asia
+SG,Singapore,Asia
+MY,Malaysia,Asia
+TH,Thailand,Asia
+ID,Indonesia,Asia
+PH,Philippines,Asia
+VN,Vietnam,Asia
+EG,Egypt,Africa
+NG,Nigeria,Africa
+ZA,South Africa,Africa
+KE,Kenya,Africa
+GH,Ghana,Africa

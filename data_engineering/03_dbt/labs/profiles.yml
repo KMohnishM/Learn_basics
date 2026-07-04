@@ -1,0 +1,41 @@
+# dbt Profiles Configuration
+# ===========================
+# Place this file at: ~/.dbt/profiles.yml
+# (NOT inside the project directory - it contains credentials!)
+#
+# This file defines how dbt connects to your databases.
+# Different "targets" (dev/prod) allow running the same models
+# against different databases with different schemas.
+#
+# The target schema isolates dev work from production:
+# - dev: all models go in schema 'dbt_dev_<yourname>'
+# - prod: all models go in schema 'analytics'
+
+ecommerce_dbt:
+  target: dev    # Default target when you run 'dbt run'
+  outputs:
+
+    # Development environment
+    # Use a separate schema so dev work doesn't pollute prod
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: deuser
+      password: depassword
+      dbname: ecommerce
+      schema: dbt_dev      # All models materialized in this schema
+      threads: 2           # How many models to build in parallel
+      keepalives_idle: 0
+
+    # Production environment (example)
+    # In real production, use environment variables for credentials
+    # prod:
+    #   type: postgres
+    #   host: "{{ env_var('PROD_DB_HOST') }}"
+    #   port: 5432
+    #   user: "{{ env_var('PROD_DB_USER') }}"
+    #   password: "{{ env_var('PROD_DB_PASSWORD') }}"
+    #   dbname: "{{ env_var('PROD_DB_NAME') }}"
+    #   schema: analytics
+    #   threads: 8

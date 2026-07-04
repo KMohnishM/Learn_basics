@@ -1,0 +1,187 @@
+version: 2
+
+# ============================================================================
+# SOURCES: Define raw/external data sources
+# ============================================================================
+# This tells dbt where to find raw data (before any dbt transformation).
+# Source declarations enable:
+# - source() function references in SQL
+# - Source freshness monitoring
+# - Documentation
+
+sources:
+  - name: raw
+    description: "Raw data tables as loaded from the application database via Fivetran/custom ETL"
+    schema: public   # The Postgres schema where raw tables live
+    
+    tables:
+      - name: users
+        description: "Raw customer/user data from the application database"
+        loaded_at_field: created_at   # Used for freshness checks
+        freshness:
+          warn_after: {count: 24, period: hour}
+          error_after: {count: 48, period: hour}
+        columns:
+          - name: user_id
+            description: "Primary key - unique user identifier"
+            tests:
+              - unique
+              - not_null
+      
+      - name: orders
+        description: "Raw orders from the application database. One row per order."
+        loaded_at_field: order_date
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 24, period: hour}
+      
+      - name: order_items
+        description: "Raw order line items. One row per product per order."
+      
+      - name: products
+        description: "Product catalog"
+
+
+# ============================================================================
+# STAGING MODELS
+# ============================================================================
+models:
+  - name: stg_orders
+    description: >
+      Cleaned and typed orders from the raw database. 
+      One row per order. Grain matches source.
+      
+      Cleaning applied:
+      - Standardized status to lowercase
+      - Cast order_date to TIMESTAMP
+      - Filtered out NULL order_ids and negative amounts
+    
+    columns:
+      - name: order_id
+        description: "Unique order identifier"
+        tests:
+          - unique
+          - not_null
+      
+      - name: customer_id
+        description: "Foreign key to stg_customers"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id
+      
+      - name: status
+        description: "Current order status"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['pending', 'processing', 'shipped', 'delivered', 'cancelled']
+      
+      - name: amount_usd
+        description: "Order total in USD"
+        tests:
+          - not_null
+  
+  - name: stg_customers
+    description: >
+      Cleaned customer data. One row per customer.
+      Names normalized to title case. Email normalized to lowercase.
+    
+    columns:
+      - name: customer_id
+        description: "Unique customer identifier"
+        tests:
+          - unique
+          - not_null
+      
+      - name: email
+        description: "Customer email address (normalized to lowercase)"
+        tests:
+          - unique
+          - not_null
+      
+      - name: country_code
+        description: "ISO 3166-1 alpha-2 country code (2 uppercase letters)"
+        tests:
+          - not_null
+
+
+# ============================================================================
+# MART MODELS
+# ============================================================================
+  - name: fct_orders
+    description: >
+      Main orders fact table. One row per non-cancelled order.
+      Joins orders with customer and country dimensions.
+      
+      NOTE: Cancelled orders are excluded. Use fct_orders_all for those.
+      
+      Updated: Daily at 3 AM UTC
+      Owner: data-engineering@company.com
+    
+    columns:
+      - name: order_id
+        description: "Unique order identifier (natural key from source)"
+        tests:
+          - unique
+          - not_null
+      
+      - name: customer_id
+        description: "Foreign key to dim_customers"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_id
+      
+      - name: status
+        description: "Order status (cancelled orders excluded from this model)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['pending', 'processing', 'shipped', 'delivered']  # No 'cancelled'!
+      
+      - name: order_total_usd
+        description: "Total order value in USD (all line items, shipping, taxes)"
+        tests:
+          - not_null
+      
+      - name: order_size_category
+        description: "Order size bucket: small (<$25), medium (<$100), large (<$500), enterprise"
+        tests:
+          - accepted_values:
+              values: ['small', 'medium', 'large', 'enterprise']
+  
+  - name: dim_customers
+    description: >
+      Customer dimension table (SCD Type 1 - no history).
+      One row per customer with latest attribute values.
+      Includes embedded order statistics for convenience.
+      
+      For historical customer attributes, use dim_customers_scd2 (see snapshots).
+    
+    columns:
+      - name: customer_id
+        description: "Primary key - unique customer identifier"
+        tests:
+          - unique
+          - not_null
+      
+      - name: email
+        description: "Customer email (lowercase normalized)"
+        tests:
+          - unique
+          - not_null
+      
+      - name: customer_segment
+        description: "Behavioral segment based on order count"
+        tests:
+          - accepted_values:
+              values: ['new', 'one_time', 'occasional', 'regular', 'vip']
+      
+      - name: customer_value_tier
+        description: "Value tier based on lifetime spend"
+        tests:
+          - accepted_values:
+              values: ['no_spend', 'low_value', 'mid_value', 'high_value', 'premium']
