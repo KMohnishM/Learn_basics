@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: de_postgres
+    environment:
+      POSTGRES_USER: deuser
+      POSTGRES_PASSWORD: depassword
+      POSTGRES_DB: ecommerce
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # healthcheck ensures the DB is ready before dependents start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deuser -d ecommerce"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
