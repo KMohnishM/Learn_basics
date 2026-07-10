@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: db_admin
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: caching_lab
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # We run the DB initialization script
+  db_init:
+    image: postgres:14
+    depends_on:
+      postgres:
+        condition: service_started
+    environment:
+      PGPASSWORD: secretpassword
+    command: >
+      bash -c "
+      sleep 5 &&
+      psql -h postgres -U db_admin -d caching_lab -c '
+      CREATE TABLE IF NOT EXISTS heavy_data (id SERIAL PRIMARY KEY, data TEXT);
+      INSERT INTO heavy_data (data) VALUES (''This is the expensive payload that takes 2 seconds to generate.'');
+      '"
