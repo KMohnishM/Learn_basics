@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      # AMQP port (for producers/consumers)
+      - "5672:5672"
+      # Management UI (http://localhost:15672, guest/guest)
+      - "15672:15672"
