@@ -14,7 +14,30 @@ Lock  │  X  │  N  │  N  │
 
 ---
 
-## Two-Phase Locking (2PL)
+## Multiple-Granularity Locking (Intention Locks)
+
+Real DBMS engines support **multiple lock granularities** (Database → Table → Page → Row). To lock a row, you must also signal intent on the parent objects using **Intention Locks**:
+
+| Lock | Name | Meaning |
+|:----:|------|---------|
+| **IS** | Intention Shared | Intend to set S lock on a child |
+| **IX** | Intention Exclusive | Intend to set X lock on a child |
+| **S** | Shared | Lock entire subtree shared |
+| **SIX** | Shared + Intention Exclusive | S on subtree + IX on some children |
+| **X** | Exclusive | Lock entire subtree exclusive |
+
+**Compatibility Matrix (IS / IX / S / SIX / X):**
+```
+         IS   IX    S   SIX   X
+IS    [  Y    Y    Y    Y    N ]
+IX    [  Y    Y    N    N    N ]
+S     [  Y    N    Y    N    N ]
+SIX   [  Y    N    N    N    N ]
+X     [  N    N    N    N    N ]
+```
+**Rule**: To lock node $N$ at granularity $G$, the transaction must acquire IS/IX locks on all ancestors of $N$ (from root down to $N$'s parent).
+
+
 
 **Core Rule**: No lock can be acquired after any lock is released.
 

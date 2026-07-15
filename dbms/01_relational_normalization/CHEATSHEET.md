@@ -67,7 +67,22 @@ $$(F_1 \cup F_2 \cup \dots \cup F_k)^+ = F^+$$
 
 ---
 
-## Normalization Decision Matrix
+## Canonical Cover (Minimal Cover) — $F_c$
+
+A **Canonical Cover** $F_c$ is a minimal, equivalent set of FDs (no redundant FDs, no redundant attributes on LHS). Required for the **3NF Synthesis Algorithm**.
+
+**Steps to find $F_c$:**
+1. **Remove extraneous attributes** from the LHS of every FD (test if $A$ is extraneous in $AB \rightarrow C$: remove $A$, check if $B^+ \ni C$ already — if yes, $A$ is extraneous).
+2. **Remove redundant FDs**: For each $X \rightarrow Y$ in $F$, check if $Y$ is derivable from $F - \{X \rightarrow Y\}$. If yes, remove it.
+3. Repeat until $F_c$ is stable.
+
+**3NF Synthesis Algorithm:**
+1. Compute the canonical cover $F_c$.
+2. For each FD $X \rightarrow Y$ in $F_c$, create relation schema $R_i(XY)$.
+3. If no schema contains a candidate key of $R$, add a new schema with the candidate key attributes.
+4. Remove any schema $R_i$ whose attributes are a subset of another schema $R_j$.
+
+
 
 ```
                 [ Atomic Attributes? ]

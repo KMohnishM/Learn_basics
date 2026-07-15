@@ -157,24 +157,43 @@ $$(DCE)^+ = \{D, C, E\}$$
 So **$DCE$ is a Candidate Key**.
 
 Let's check $BCE$:
-$$(BCE)^+ = \{B, C, E\}$$ (Cannot determine others because $B$ and $C$ alone do not lead to $A$ or $D$).
+$$(BCE)^+ = \{B, C, E\}$$
+- $BC \rightarrow D \implies (BCE)^+ = \{B, C, D, E\}$
+- $D \rightarrow A \implies (BCE)^+ = \{A, B, C, D, E\} = R$. ✓
 
-**Candidate Keys**: $\{ACE, DCE\}$.
-- **Prime attributes**: $\{A, C, D, E\}$
-- **Non-prime attributes**: $\{B\}$
+Is $BCE$ minimal? Check proper subsets:
+- $(BE)^+$: No FD fires for $B$ or $E$ alone (we need both $B$ **and** $C$ for $BC \rightarrow D$). $(BE)^+ = \{B, E\} \ne R$.
+- $(CE)^+$: No FD has $C$ alone on the LHS. $(CE)^+ = \{C, E\} \ne R$.
+- $(BC)^+$: $BC \rightarrow D$, $D \rightarrow A$, $A \rightarrow B$ (already present). $(BC)^+ = \{A, B, C, D\} \ne R$ (missing $E$).
+
+So $BCE$ is **irreducible** — **$BCE$ is a Candidate Key**. ✓
+
+**Candidate Keys**: $\{ACE, DCE, BCE\}$.
+- **Prime attributes** (appear in at least one candidate key): $\{A, B, C, D, E\}$ — every attribute is prime!
+- **Non-prime attributes**: $\emptyset$ (none)
 
 **Step 2: Test 1NF.**
-- Assumed to be in 1NF (atomic attributes).
+- Assumed to be in 1NF (atomic attributes). ✓
 
 **Step 3: Test 2NF.**
-- A relation is in 2NF if there are no partial dependencies on any candidate key for any **non-prime** attribute.
-- The only non-prime attribute is $B$.
-- Let's check FDs pointing to $B$: $A \rightarrow B$.
-- Is $A$ a proper subset of a candidate key? Yes, $A$ is a proper subset of $ACE$.
-- Therefore, $A \rightarrow B$ is a **partial dependency** (a part of candidate key determines a non-prime attribute).
-- Hence, the relation is **NOT in 2NF**.
+- A relation is in 2NF if there are no **partial dependencies** (a proper subset of a candidate key determines a non-prime attribute).
+- Since there are **no non-prime attributes**, partial dependencies involving non-prime attributes cannot exist.
+- ✅ The relation is in **2NF**.
 
-**Conclusion**: The highest normal form of the relation is **1NF**.
+**Step 4: Test 3NF.**
+- A relation is in 3NF if, for every non-trivial FD $X \rightarrow Y$: either (a) $X$ is a superkey, or (b) $Y$ is a prime attribute.
+- Check each FD:
+  - $A \rightarrow B$: Is $A$ a superkey? $A^+ = \{A, B\} \ne R$ → No. Is $B$ a prime attribute? → **Yes** ($B \in BCE$). ✅
+  - $BC \rightarrow D$: Is $BC$ a superkey? $(BC)^+ = \{A, B, C, D\} \ne R$ → No. Is $D$ prime? → **Yes** ($D \in DCE$). ✅
+  - $D \rightarrow A$: Is $D$ a superkey? $D^+ = \{A, B, D\} \ne R$ → No. Is $A$ prime? → **Yes** ($A \in ACE$). ✅
+- ✅ The relation is in **3NF**.
+
+**Step 5: Test BCNF.**
+- A relation is in BCNF if, for every non-trivial FD $X \rightarrow Y$: $X$ must be a **superkey**.
+- $A \rightarrow B$: $A^+ = \{A, B\} \ne R$ → $A$ is **not a superkey**. ❌
+- BCNF is **violated**.
+
+**Conclusion**: The highest normal form of $R$ is **3NF** (not BCNF, because $A \rightarrow B$ has a non-superkey LHS).
 
 ---
 

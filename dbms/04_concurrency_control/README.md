@@ -60,7 +60,7 @@ Locks Held
 1. **Growing Phase**: Transaction may obtain locks, but cannot release any.
 2. **Shrinking Phase**: Transaction may release locks, but cannot obtain any new locks.
 
-- **Lock Point**: The moment the transaction releases its first lock (marks the end of the growing phase).
+- **Lock Point**: The exact instant at which the transaction **acquires its last (final) lock** — the peak of its lock-holding curve, marking the end of the Growing Phase and the start of the Shrinking Phase.
 - **Theorem**: 2PL guarantees **conflict serializability**.
 - **Limitations**: 
   - 2PL can lead to **deadlocks** (e.g., $T_1$ holds $A$, waits for $B$; $T_2$ holds $B$, waits for $A$).

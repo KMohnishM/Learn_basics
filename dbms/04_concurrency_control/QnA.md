@@ -19,8 +19,9 @@
 
 **Q2. What is the "Lock Point" of a transaction in 2PL?**
 
-In Two-Phase Locking (2PL), the **Lock Point** is the exact moment when the transaction releases its very first lock.
+In Two-Phase Locking (2PL), the **Lock Point** of a transaction is the exact moment at which it **acquires its final (last) lock** — the peak of the lock-holding curve.
 - It marks the boundary where the **Growing Phase** ends and the **Shrinking Phase** begins.
+- Note: This is the same boundary as when the first lock *could* be released, but the standard definition (Silberschatz, Ramakrishnan) frames it as "the last acquisition," not "the first release."
 - The lock point is important because the serialization order of transactions in a 2PL schedule is determined by the chronological order of their lock points.
 
 ---
@@ -101,10 +102,11 @@ $T_3$ is **younger** than $T_2$ ($30 > 20$).
 #### Step-by-step analysis:
 
 - **Time 4: $T_1$ reads $X$ (REPEATABLE READ)**
-  - $T_1$ created its Read View at start (Time 1).
-  - At Time 1, the committed version of $X$ was $10$ (committed by $T_0$). The update to $20$ by $T_3$ had not happened yet.
-  - Under Repeatable Read, $T_1$ uses its initial Read View. It ignores all changes made after Time 1.
-  - **Result**: $T_1$ reads **$10$**.
+  - **⚠️ InnoDB Note**: In InnoDB, the Read View for REPEATABLE READ is created at the time of the **first SELECT statement**, not at `BEGIN`/`START TRANSACTION`. This question specifies Time 4 as $T_1$'s *first* read — so the Read View is created at Time 4.
+  - At Time 4, the committed versions of $X$ are: $10$ (by $T_0$) and $20$ (committed by $T_3$ at Time 3). At the moment the Read View is created at Time 4, $T_3$ is already committed.
+  - Therefore, the Read View's `up_to_trx_id` will include $T_3$'s commit. The most recent committed version visible to $T_1$'s Read View is $20$.
+  - **Result**: $T_1$ reads **$20$**.
+  - *Note*: If $T_1$ had executed any SELECT statement *before* Time 3 (e.g., a `SELECT 1`), then its Read View would have been fixed earlier and it would see $10$. This is a well-known InnoDB subtlety: use `START TRANSACTION WITH CONSISTENT SNAPSHOT` to force Read View creation at BEGIN.
 
 - **Time 5: $T_2$ reads $X$ (READ COMMITTED)**
   - Under Read Committed, $T_2$ creates a *new* Read View for this specific read statement.

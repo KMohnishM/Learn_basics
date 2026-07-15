@@ -198,7 +198,7 @@ If all dependencies in $F$ are preserved, the decomposition is dependency-preser
 ## 7. Multi-valued Dependencies (MVDs) & 4NF
 
 ### Multi-valued Dependency (MVD)
-An MVD $X \twoheadrightarrow Y$ holds on $R$ if, for any legal relation instance, the presence of tuple $(x, y, z_1)$ and $(x, y_2, z_2)$ implies the presence of $(x, y_2, z_1)$ and $(x, y, z_2)$.
+An MVD $X \twoheadrightarrow Y$ holds on $R$ if, for any legal relation instance, the presence of tuples $(x, y_1, z_1)$ and $(x, y_2, z_2)$ implies the presence of $(x, y_1, z_2)$ and $(x, y_2, z_1)$. (The $Y$-values from both tuples swap with both $Z$-values.)
 - The value of $X$ determines a *set* of values for $Y$, and this set is completely independent of the attributes in $Z = R - (X \cup Y)$.
 - Represented with a double-headed arrow: $X \twoheadrightarrow Y$.
 - **Trivial MVD**: $X \twoheadrightarrow Y$ is trivial if $Y \subseteq X$ or $X \cup Y = R$.

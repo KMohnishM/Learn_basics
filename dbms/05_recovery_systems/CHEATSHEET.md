@@ -48,7 +48,7 @@ Given a crash, locate the last `<checkpoint L>`:
 ### 2. Redo Phase
 - Start: Oldest `recLSN` in the Dirty Page Table.
 - Scan direction: **Forward** to the end of the log.
-- Action: Reapply all changes (both committed and aborted). Write CLRs (Compensation Log Records) during rollback.
+- Action: Reapply all changes (both committed and to-be-aborted transactions). **Skip** if PageLSN on disk ≥ LSN of log record (already persisted).
 
 ### 3. Undo Phase
 - Start: End of the log.
