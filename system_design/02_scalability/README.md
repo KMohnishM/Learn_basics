@@ -323,8 +323,12 @@ Weighted Round Robin:
   Server C (weight=2): Older, weaker server -- 2/10 = 20% of traffic
   Total weights = 10
 
-Request distribution in one "cycle":
-  A, A, A, A, A, B, B, B, C, C (then repeat)
+Request distribution using **smooth weighted round-robin** (Nginx default):
+  A, B, A, C, A, B, A, B, A, C  (requests interleaved, not blocked)
+
+  Note: Naive WRR would send A,A,A,A,A,B,B,B,C,C in a block — this causes
+  micro-bursting to one server. Nginx uses smooth WRR to spread load evenly
+  within each "cycle" while still respecting the weight ratios.
 ```
 
 **When it works**: Heterogeneous servers (different CPU/RAM specs).
