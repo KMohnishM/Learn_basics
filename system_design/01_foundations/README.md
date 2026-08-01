@@ -115,7 +115,7 @@ CLIENT                              SERVER
 ```
 
 **Why This Matters for System Design**:
-- Each TCP handshake adds **1.5 RTT** before data transfer begins
+- Each TCP handshake adds **1.0 RTT** before data transfer begins (the client piggybacks its HTTP GET on the ACK packet, so data flows after SYN → SYN-ACK → ACK+GET — exactly 1 full round-trip)
 - For a user in New York connecting to London (~100ms RTT):
   - TCP handshake alone costs 150ms
   - TLS handshake costs another 150-300ms (1-2 RTTs)
@@ -850,7 +850,7 @@ Final Answer:
 Per minute: 500 GB raw video
 With multiple resolutions (360p, 720p, 1080p, 4K) = ~4x = 2 TB/minute
 With replication (3x): 6 TB/minute
-Per year: 6 TB * 60 * 24 * 365 = ~3,153 TB = ~3 EB/year just for new uploads
+Per year: 6 TB * 60 * 24 * 365 = ~3,153,600 TB = ~3,153 PB = ~3.15 EB/year just for new uploads
 ```
 
 **WhatsApp Message Volume**:
