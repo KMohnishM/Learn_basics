@@ -1,0 +1,46 @@
+# Redis Data Structures Q&A
+
+**1. How does Redis achieve such high performance despite being primarily single-threaded for command execution?**
+Redis achieves high performance by utilizing an I/O multiplexing event loop (like epoll or kqueue) which allows a single thread to handle thousands of concurrent connections efficiently. Because command execution is strictly single-threaded, Redis completely avoids the overhead of context switching, thread synchronization, and mutex lock contention. Furthermore, Redis operates entirely in memory, meaning data access times are measured in microseconds. For CPU-intensive background tasks like saving to disk (RDB/AOF), Redis forks background processes, and for network I/O, Redis 6+ introduced I/O threads, keeping the main execution thread unblocked.
+
+**2. Explain the difference between `SETNX` and a regular `SET` command. What is its primary use case?**
+`SETNX` stands for "SET if Not eXists". Unlike a regular `SET` command which will blindly overwrite the existing value of a key, `SETNX` will only execute the write if the key does not already exist in the database. If the key exists, the command returns 0 and does nothing. The primary use case for `SETNX` is implementing primitive distributed locks. A client can attempt to acquire a lock by calling `SETNX lock_key 1`; if successful, they hold the lock.
+
+**3. In Redis Strings, what dictates whether the internal encoding is `int`, `embstr`, or `raw`?**
+Redis optimizes memory usage based on the actual content of the string. If the string represents a signed 64-bit integer, Redis encodes it as an `int`. If the string length is relatively short (typically up to 44 bytes), it is encoded as `embstr`, where the Redis Object structure and the string data (SDS) are allocated in a single, contiguous block of memory to reduce pointer overhead and fragmentation. For strings larger than 44 bytes, Redis uses `raw` encoding, requiring two separate memory allocations for the object overhead and the string data.
+
+**4. What is the fundamental difference in time complexity between `LINDEX` and `ZSCORE`?**
+`LINDEX` retrieves an element from a List by its positional index. Because Redis Lists are implemented as linked lists (quicklists), traversing to a specific index in the middle of the list requires iterating through nodes, making the time complexity O(N). Conversely, `ZSCORE` retrieves the score of a member in a Sorted Set. Because Sorted Sets maintain an internal Hash Table mapping members to their scores, `ZSCORE` operates in constant O(1) time, regardless of the size of the sorted set.
+
+**5. How would you implement a reliable worker queue using Redis Lists to ensure jobs are not lost if a consumer crashes?**
+To build a reliable queue, you should use the `LMOVE` (or the blocking variant `BLMOVE`) command. You maintain two lists: `pending_jobs` and `processing_jobs`. A worker calls `BLMOVE pending_jobs processing_jobs RIGHT LEFT 0`. This atomically pops the job from the pending queue and pushes it into the processing queue. If the worker crashes while processing, the job remains safely in the `processing_jobs` list. A separate supervisor process can periodically scan the `processing_jobs` list and move stalled jobs back to `pending_jobs`.
+
+**6. What are the advantages of using Redis Sets for a social network's "Mutual Friends" feature?**
+Redis Sets are unordered collections of unique elements. The major advantage is that Redis natively provides highly optimized, server-side mathematical set operations. To find mutual friends, you store user A's friends in one set, and user B's friends in another. You can then execute `SINTER friends:userA friends:userB`. Redis computes the intersection entirely in memory and in C, which is drastically faster and requires much less network bandwidth than fetching both lists to the application layer and computing the intersection there.
+
+**7. Describe the dual internal data structure used for Redis Sorted Sets (ZSETs).**
+A Sorted Set requires both O(1) lookup of a member's score and O(log N) range queries by score. To achieve this, Redis uses a dual data structure approach. It maintains a Hash Table that maps the string members to their floating-point scores, enabling the O(1) `ZSCORE` operation. Simultaneously, it maintains a Skip List containing the elements sorted by their score. The Skip List allows efficient O(log N) operations like `ZRANGE` or `ZRANK`.
+
+**8. When should you use a Hash instead of multiple String keys with a naming convention (e.g., `user:100:name`, `user:100:age`)?**
+You should use Hashes when grouping related fields of an object. Storing a user as a Hash (`HSET user:100 name "Alice" age 30`) is far more memory efficient because Redis optimizes small hashes using a compact `listpack` encoding. It also prevents namespace pollution, making your key space smaller and easier to manage. Finally, you can retrieve the entire object atomically using `HGETALL`, whereas using multiple string keys would require a bulk `MGET` or multiple network round trips.
+
+**9. What is a HyperLogLog and what trade-off does it make?**
+HyperLogLog (HLL) is a probabilistic data structure used to estimate the cardinality (number of unique elements) of a large dataset. The trade-off it makes is sacrificing absolute accuracy for massive memory savings. While a standard Set requires O(N) memory to store every unique element, an HLL requires a fixed maximum of 12KB of memory, regardless of whether you insert a thousand or a billion unique elements. It provides an estimated count with a standard error rate of approximately 0.81%.
+
+**10. How can Bitmaps be used to efficiently calculate Daily Active Users (DAU) for a month?**
+Bitmaps use offsets in a String to represent boolean states. You can assign each user a sequential ID. For each day, create a key (e.g., `dau:2023-10-01`). When user 500 logs in, set their bit: `SETBIT dau:2023-10-01 500 1`. To find the DAU for a day, run `BITCOUNT dau:2023-10-01`. To find the total unique active users across the entire month, you can use `BITOP OR result_key dau:2023-10-01 ... dau:2023-10-31`, and then run `BITCOUNT result_key`. This is incredibly space-efficient; millions of users require only a few megabytes of RAM.
+
+**11. In Redis Streams, what is a Consumer Group and how does it differ from a standard Pub/Sub model?**
+A Consumer Group in Streams allows a fleet of consumer applications to cooperatively read from the same stream, ensuring that each message is delivered to exactly one consumer in the group, effectively acting as a competing-consumers work queue. Standard Redis Pub/Sub is a "fire-and-forget" broadcast model; if a subscriber is offline, it misses the message, and all active subscribers receive all messages. Streams persist the data, and Consumer Groups track which messages have been delivered and acknowledged (via `XACK`) by the workers.
+
+**12. What is the Pending Entries List (PEL) in Redis Streams?**
+When a message from a stream is delivered to a consumer within a Consumer Group, it is added to the Pending Entries List (PEL). The message stays in the PEL until the consumer explicitly acknowledges successful processing by calling `XACK`. The PEL guarantees message durability. If a consumer crashes, the unacknowledged message remains in the PEL and can be observed using `XPENDING` and reassigned to a healthy consumer using `XCLAIM`.
+
+**13. How does Redis calculate the distance between two points in its Geo data structure?**
+Redis Geo commands (like `GEOADD`, `GEODIST`) are built on top of Sorted Sets. When you add coordinates, Redis interleave the longitude and latitude to create a 52-bit Geohash integer. This integer is stored as the score in the ZSET. When calculating the distance between two members using `GEODIST`, Redis retrieves their coordinates and applies the Haversine formula, which calculates the great-circle distance between two points on a sphere, assuming the Earth is a perfect sphere.
+
+**14. What happens when a Hash exceeds the `hash-max-listpack-entries` threshold in `redis.conf`?**
+When a Hash is small (under the threshold limits), Redis stores it using a contiguous memory structure called a `listpack` to save significant amounts of RAM. If you add an entry that causes the total number of fields to exceed `hash-max-listpack-entries`, or if the size of a specific field/value exceeds `hash-max-listpack-value`, Redis dynamically re-encodes the entire Hash from a `listpack` into a full standard Hash Table. This increases memory consumption but prevents CPU degradation when accessing large Hashes.
+
+**15. Why should you avoid using the `KEYS *` command in a production environment, and what is the alternative?**
+The `KEYS *` command scans the entire keyspace to find matching patterns. Because Redis is single-threaded, a `KEYS` command on a database with millions of keys will block the event loop for hundreds of milliseconds or even seconds, causing all other client requests to time out and potentially crashing applications. The safe alternative is the `SCAN` command, which is a cursor-based iterator. `SCAN` returns a small subset of keys and a new cursor per call, allowing you to iterate over the keyspace incrementally without blocking the main thread.
