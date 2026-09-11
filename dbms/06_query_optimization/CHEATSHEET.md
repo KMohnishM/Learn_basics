@@ -1,70 +1,57 @@
-# Cheat Sheet — Query Processing & Optimization
+# Query Optimization Cheatsheet
 
-## Relational Algebra Symbols
+## EXPLAIN ANALYZE Fields
 
-| Operation | Symbol | Syntax | Purpose |
-|-----------|:------:|--------|---------|
-| **Selection** | $\sigma$ | $\sigma_p(R)$ | Select rows matching predicate $p$ |
-| **Projection** | $\pi$ | $\pi_{A_1, A_2}(R)$ | Select specific columns, drop duplicates |
-| **Cartesian Product**| $\times$ | $R \times S$ | Cross-combine all rows |
-| **Rename** | $\rho$ | $\rho_{x}(R)$ | Rename table to $x$ |
-| **Natural Join** | $\bowtie$ | $R \bowtie S$ | Join on matching common columns |
-| **Theta Join** | $\bowtie_\theta$ | $R \bowtie_\theta S$ | Cartesian product then filter $\theta$ |
-| **Union** | $\cup$ | $R \cup S$ | Combine rows (union-compatible) |
-| **Difference** | $-$ | $R - S$ | Rows in $R$ but not in $S$ |
-| **Intersection** | $\cap$ | $R \cap S$ | Rows in both $R$ and $S$ |
+| Field | Description | Formula / Note |
+|---|---|---|
+| cost | Planner's estimate of the plan cost | `startup_cost .. total_cost` |
+| rows | Estimated/Actual number of rows | Planner vs Execution actuals |
+| width | Average width of rows in bytes | Affects memory and network |
+| loops | Number of times a node is executed | Multiply actual rows/time by loops |
+| time | Actual time spent (ms) | `startup_time .. total_time` |
+| buffers | Memory/Disk block usage | 1 block = 8KB (usually). Hits vs Reads. |
 
----
+## Join Algorithms
 
-## Join Cost Models (Disk I/O Block Transfers)
+| Algorithm | Complexity | Best For | Requirement |
+|---|---|---|---|
+| Nested Loop | O(N * M) | Small outer relation, indexed inner | Fast inner index lookup |
+| Hash Join | O(N + M) | Unsorted large sets | `work_mem` > Hash table size |
+| Merge Join | O(N log N + M log M) | Large pre-sorted relations | Equi-joins, sortable data types |
 
-Let $R$ be the outer relation, $S$ be the inner relation.
-$b_r, b_s$ = blocks, $t_r, t_s$ = tuples, $M$ = memory buffer pages.
+## Optimization Rules
+1. Never use functions on indexed columns (Non-SARGable)
+2. Use Keyset Pagination instead of OFFSET/LIMIT
+3. Use Covering Indexes (INCLUDE) to enable Index-Only Scans
+4. Fix N+1 queries by using JOINs
+5. Always run ANALYZE after massive data changes
 
-### 1. Block Nested Loop Join
-- **Worst Case** (1 block buffer for $R$ and 1 for $S$):
-  $$\text{Cost} = b_r + (b_r \cdot b_s)$$
-- **Standard case** (using $M-2$ pages for outer relation $R$):
-  $$\text{Cost} = b_r + \left( \lceil \frac{b_r}{M - 2} \rceil \cdot b_s \right)$$
-- **Best Case** (outer relation $R$ fits in memory: $b_r < M - 2$):
-  $$\text{Cost} = b_r + b_s$$
+## work_mem and Spilling
 
-### 2. Index Nested Loop Join
-- Index on join column of inner relation $S$ (search cost = $c$):
-  $$\text{Cost} = b_r + t_r \cdot c$$
+- **work_mem**: Maximum amount of memory to be used by query operations (sorts, hash tables) before writing to temporary disk files.
+- **Temp Files**: When `work_mem` is exceeded, operations spill to disk (temp files).
+- **Formula**: `Max Memory per Connection = work_mem * (concurrent sorts/hashes)`
 
-### 3. Sort-Merge Join (after sorting)
-- **Cost**: $b_r + b_s$
+## Common Slow Query Patterns and Fixes
 
-### 4. Hash Join (assuming no overflow)
-- **Cost**: $3(b_r + b_s)$
-  *(2 passes to partition, 1 pass to probe).*
+| Anti-Pattern | Solution |
+|---|---|
+| Non-SARGable predicates (e.g., `WHERE YEAR(date) = 2023`) | SARGable predicates (e.g., `WHERE date >= '2023-01-01'`) |
+| OFFSET/LIMIT pagination | Keyset pagination (`WHERE id > last_id`) |
+| Missing covering index | Add `INCLUDE` columns to index |
+| Uncorrelated subqueries causing N+1 | Rewrite as `JOIN` or `EXISTS` |
+| Corrupt statistics | Run `ANALYZE` or adjust `default_statistics_target` |
 
----
+## Partitioning Types
 
-## External Merge Sort Cost Formula
+1. **Range**: Partition by continuous ranges (e.g., dates).
+2. **List**: Partition by discrete values (e.g., region codes).
+3. **Hash**: Partition by a modulus and remainder.
 
-To sort a relation $R$ of $b_r$ blocks using $M$ buffer pages:
-$$\text{Total Cost} = 2b_r \cdot (\text{Number of passes})$$
-$$\text{Number of passes} = 1 \text{ (Pass 0: run generation)} + \lceil \log_{M-1}( \lceil b_r / M \rceil ) \rceil$$
+## Cost Model Parameters
 
----
-
-## Query Tree Equivalence Rules
-- **Pushing Selection down**: $\sigma_p(R \bowtie S) \equiv \sigma_p(R) \bowtie S$ (if $p$ only involves $R$)
-- **Pushing Projection down**: $\pi_{A}(R \bowtie S) \equiv \pi_{A}(\pi_{A \cap R}(R) \bowtie \pi_{A \cap S}(S))$
-- **Join Commutativity**: $R \bowtie S \equiv S \bowtie R$
-- **Join Associativity**: $(R \bowtie S) \bowtie T \equiv R \bowtie (S \bowtie T)$
-
----
-
-## MySQL EXPLAIN Join Type Matrix
-
-| type | Speed | Description | Example |
-|------|:-----:|-------------|---------|
-| `const` | ⭐⭐⭐⭐⭐ | Single row match | Primary key lookup |
-| `eq_ref` | ⭐⭐⭐⭐ | Unique index lookup in join | Join on primary key |
-| `ref` | ⭐⭐⭐ | Non-unique index lookup | Join on foreign key |
-| `range` | ⭐⭐ | Index range scan | `WHERE id > 10` |
-| `index` | ⭐ | Full index scan (leaves only) | Scans index, no table read |
-| `ALL` | ❌ | Full table scan (entire disk file) | Scans all rows on disk |
+- `seq_page_cost`: 1.0 (default)
+- `random_page_cost`: 4.0 (default, lower to 1.1 on SSD)
+- `cpu_tuple_cost`: 0.01 (default)
+- `cpu_index_tuple_cost`: 0.005 (default)
+- `cpu_operator_cost`: 0.0025 (default)
