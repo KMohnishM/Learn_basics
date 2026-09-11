@@ -1,71 +1,66 @@
-# Cheat Sheet — Database Architectures & NoSQL
+# Database Architectures Cheatsheet
 
-## Partitioning vs. Sharding
-- **Partitioning**: Logical separation of table rows within the **same** database server instance.
-- **Sharding**: Physical separation of table rows across **different** database servers (shared-nothing).
+## OLTP vs OLAP
 
----
+| Feature | OLTP (Online Transaction Processing) | OLAP (Online Analytical Processing) |
+| :--- | :--- | :--- |
+| **Primary Goal** | Fast, reliable transactional execution | Complex analytical queries, Business Intelligence |
+| **Workload** | High volume of short, simple atomic transactions | Low volume of long, complex read-heavy queries |
+| **Data Layout** | Row-oriented storage | Column-oriented storage |
+| **Schema Design** | Highly Normalized (3NF) | Denormalized (Star, Snowflake) |
+| **Operations** | CRUD (Insert, Update, Delete, Point Lookup) | Complex Selects, Joins, Aggregations (SUM, AVG) |
+| **History** | Current state of operational data | Historical data spanning months/years |
+| **Examples** | PostgreSQL, MySQL, Oracle DB | Snowflake, Redshift, ClickHouse, BigQuery |
 
-## Consistent Hashing (Hash Ring)
-- Keys and Server Nodes are hashed to a circular integer space (ring).
-- **Lookup**: Hash key $\rightarrow$ traverse clockwise $\rightarrow$ store on first node found.
-- **Scaling**: Adding/removing a node only triggers data migration of $\approx 1/N$ keys (adjacent items).
-- **Virtual Nodes**: Map one physical node to multiple points on the ring to prevent hot spots.
+## Storage Formats
 
----
+| Format | Layout Structure | Best For | Pros | Cons |
+| :--- | :--- | :--- | :--- | :--- |
+| **Row-Oriented** | Contiguous by row on disk | OLTP, point lookups, single-record updates | Fast full-record reads and appends | Inefficient for large aggregations (high I/O waste) |
+| **Column-Oriented**| Contiguous by column on disk| OLAP, aggregations, scanning specific fields| Extreme compression (RLE), minimal I/O for analytics| Very slow for single-record inserts/updates/deletes |
 
-## CAP Theorem (Partitions)
+## Sharding Strategies (Horizontal Partitioning)
 
-In a network partition ($P$), choose either:
-- **CP (Consistency)**: Reject writes / block reads in minority partitions to guarantee linearizability. (e.g., MongoDB, HBase).
-- **AP (Availability)**: Allow reads/writes on all partitioned nodes, return stale data, resolve conflicts later. (e.g., Cassandra, CouchDB).
+| Strategy | Mechanism | Pros | Cons |
+| :--- | :--- | :--- | :--- |
+| **Hash Sharding** | `hash(key) % N` | Perfectly uniform data/write distribution | Range queries are inefficient; hard to reshard (unless using consistent hashing) |
+| **Range Sharding** | Grouping by value intervals (e.g., Dates A-C) | Extremely fast and efficient range queries | High risk of hot spots (e.g., all writes hit "today's" shard) |
+| **Directory Sharding**| Lookup table mapping key to shard | Maximum flexibility, easy manual migrations | Lookup table becomes single point of failure and bottleneck |
 
----
+## Consistency, Availability, Partition Tolerance (CAP Theorem)
 
-## PACELC Theorem (CAP Extension)
+**Core Rule:** A distributed database can guarantee at most TWO out of three properties in the presence of a network partition (P). Since P is guaranteed in distributed networks, systems must choose between AP and CP.
 
-```
-If Partition (P) -> Choose Availability (A) or Consistency (C)
-Else (E)         -> Choose Latency (L) or Consistency (C)
-```
+| Type | Definition | Behavior during Partition | Examples |
+| :--- | :--- | :--- | :--- |
+| **CP** | Consistency + Partition Tolerance | System rejects writes/reads to avoid stale data | MongoDB, Zookeeper, etcd, HBase |
+| **AP** | Availability + Partition Tolerance | System returns data (potentially stale) to remain online | Cassandra, DynamoDB, Riak, CouchDB |
+| **CA** | Consistency + Availability | Practically impossible on a distributed network | Single-node PostgreSQL/MySQL (not distributed) |
 
-| Database | PACELC Classification | Priority |
-|----------|:---------------------:|----------|
-| **Cassandra** | **PA / EL** | Availability (Partition), Latency (Normal) |
-| **MongoDB** | **PC / EC** | Consistency (Partition), Consistency (Normal) |
-| **HBase** | **PC / EC** | Consistency (Partition), Consistency (Normal) |
-| **DynamoDB** | **PA / EL** | Configurable (defaults to Availability/Latency) |
+### PACELC Theorem
+If **P** (Partition), choose **A** or **C**. **E**lse (Normal operation), choose **L** (Latency) or **C** (Consistency).
+- Cassandra = **PA/EL**
+- Spanner = **PC/EC**
 
----
+## Replication Patterns
 
-## Quorum Invariant (Leaderless Replication)
+1. **Single-Leader**: One node accepts writes, followers replicate. (Risk: Write bottleneck).
+2. **Multi-Leader**: Multiple nodes accept writes. (Risk: Complex conflict resolution).
+3. **Leaderless**: Any node accepts reads/writes. Uses **Quorum**:
+   - `W + R > N` (Strict Consistency)
+   - `W + R <= N` (Eventual Consistency)
+   *(N = Total Replicas, W = Write Nodes, R = Read Nodes)*
 
-Let $N$ = replica count, $W$ = write quorum (acknowledgments), $R$ = read quorum.
+## Consistency Models (Strongest to Weakest)
 
-- **Strong Consistency**:
-  $$R + W > N$$
-  *(Guarantees at least one read replica contains the latest written version).*
-- **Eventual Consistency**:
-  $$R + W \le N$$
-  *(Risk of stale reads).*
+1. **Strict / Linearizable**: Acts like a single global copy. Atomic operations.
+2. **Sequential**: All nodes see operations in the same exact order.
+3. **Causal**: Causally related operations are seen in order; concurrent ops can be reordered.
+4. **Eventual**: If updates stop, all nodes will eventually hold the same data.
 
----
+## Schema Modeling for Data Warehouses
 
-## B+ Trees vs. LSM-Trees (Storage Engines)
-
-| Feature | B+ Trees | LSM-Trees |
-|---------|----------|-----------|
-| **Write Type** | In-place random writes | Append-only sequential writes |
-| **Optimized For** | Point reads (read-heavy) | High-speed ingestion (write-heavy) |
-| **Read Amplification**| Low | High (must search MemTable + multiple SSTables) |
-| **Write Amplification**| Medium-High (dirty page flushes) | High (background compactions) |
-| **Used In** | MySQL InnoDB, PostgreSQL | Cassandra, RocksDB, LevelDB |
-
----
-
-## NoSQL Classifications
-
-- **Key-Value**: Key $\rightarrow$ Blob map (e.g., Redis). Cache, sessions.
-- **Document**: JSON storage (e.g., MongoDB). Flexible schemas.
-- **Wide-Column**: Key $\rightarrow$ Column family (e.g., Cassandra). Large timeseries/analytics.
-- **Graph**: Nodes + Edges (e.g., Neo4j). Relationships, fraud detection.
+| Type | Structure | Pros | Cons |
+| :--- | :--- | :--- | :--- |
+| **Star Schema** | Central Fact table linked directly to denormalized Dimension tables | Fast queries, very few joins, simple to query | High disk space usage, massive data redundancy |
+| **Snowflake** | Central Fact table linked to normalized hierarchy of Dimension tables | Low redundancy, preserves hierarchical integrity | Slower queries, complex SQL requiring deep joins |
