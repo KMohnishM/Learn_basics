@@ -1,114 +1,86 @@
-# Cheat Sheet — SQL Query Mastering (MySQL)
+# Advanced SQL Cheatsheet (PostgreSQL)
 
-## Logical Execution Order
-```
-1. FROM (and JOINs)
-2. ON
-3. WHERE
-4. GROUP BY
-5. HAVING
-6. SELECT
-7. DISTINCT
-8. ORDER BY
-9. LIMIT / OFFSET
-```
+## 1. Window Functions
+| Syntax / Function | Description | Example |
+| :--- | :--- | :--- |
+| `OVER (...)` | Defines the window. Required for window functions. | `SUM(val) OVER (PARTITION BY dep ORDER BY date)` |
+| `ROW_NUMBER()` | Unique integer for each row in partition. No gaps. | `ROW_NUMBER() OVER(ORDER BY salary DESC)` |
+| `RANK()` | Rank with gaps for ties (1, 1, 3). | `RANK() OVER(ORDER BY salary DESC)` |
+| `DENSE_RANK()` | Rank with NO gaps for ties (1, 1, 2). | `DENSE_RANK() OVER(ORDER BY salary DESC)` |
+| `LAG(col, n)` | Access value `n` rows before current row. | `LAG(revenue, 1) OVER(ORDER BY month)` |
+| `LEAD(col, n)` | Access value `n` rows after current row. | `LEAD(revenue, 1) OVER(ORDER BY month)` |
+| `FIRST_VALUE(col)` | First value in the window frame. | `FIRST_VALUE(name) OVER(PARTITION BY dep ORDER BY salary)` |
+| `NTH_VALUE(col, n)` | Nth value in the window frame. | `NTH_VALUE(name, 2) OVER(PARTITION BY dep ORDER BY salary)` |
 
----
+## 2. Window Frame Clauses (Inside OVER)
+*Default if ORDER BY is present:* `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`
+*Default if NO ORDER BY:* `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING`
 
-## Join Cheat Sheet
+| Frame Type | Description | Usage Note |
+| :--- | :--- | :--- |
+| `ROWS` | Physical rows. Ignored ties. | Best for strictly sequential data (e.g., exactly 3 previous rows). |
+| `RANGE` | Logical boundaries. Groups ties. | Best for date ranges or when ties should share a total. |
+| `UNBOUNDED PRECEDING` | From the start of the partition. | Used for cumulative sums. |
+| `N PRECEDING` | N rows/values before current. | Used for moving averages. |
+| `CURRENT ROW` | The current row (or peers for RANGE). | End point for running totals. |
+| `UNBOUNDED FOLLOWING` | To the end of the partition. | Required to find last values. |
 
-- **Inner Join**: Match in both tables
-  ```sql
-  SELECT * FROM A INNER JOIN B ON A.id = B.id;
-  ```
-- **Left Join**: All A, matched B (NULLs on right if unmatched)
-  ```sql
-  SELECT * FROM A LEFT JOIN B ON A.id = B.id;
-  ```
-- **Self Join**: Table joined with itself
-  ```sql
-  SELECT e.name, m.name FROM employees e LEFT JOIN employees m ON e.manager_id = m.id;
-  ```
-- **MySQL Full Outer Join emulation**:
-  ```sql
-  SELECT * FROM A LEFT JOIN B ON A.id = B.id
-  UNION
-  SELECT * FROM A RIGHT JOIN B ON A.id = B.id;
-  ```
+## 3. Advanced Aggregation
+| Feature | Syntax Example | Use Case |
+| :--- | :--- | :--- |
+| `FILTER` | `SUM(amt) FILTER (WHERE status = 'PAID')` | Clean pivot tables, conditional aggregation. |
+| `GROUPING SETS` | `GROUP BY GROUPING SETS ((a,b), (a), ())` | Specific combinations of subtotals and grand totals. |
+| `ROLLUP` | `GROUP BY ROLLUP (year, month, day)` | Hierarchical subtotals (Year -> Month -> Day). |
+| `CUBE` | `GROUP BY CUBE (color, size)` | All possible multidimensional subtotals (cross-tabs). |
+| `GROUPING()` | `SELECT GROUPING(dep) ...` | Returns 1 if column is a subtotal/grand total row, 0 if raw data. |
 
----
-
-## MySQL Window Functions (MySQL 8.0+)
-
-### Syntax
-```sql
-FUNCTION() OVER (PARTITION BY col1 ORDER BY col2 [FRAME_CLAUSE])
-```
-
-### Key Functions
-- **`ROW_NUMBER()`**: Unique sequence `1, 2, 3, 4`.
-- **`RANK()`**: Sequence with gaps `1, 2, 2, 4`.
-- **`DENSE_RANK()`**: Sequence without gaps `1, 2, 2, 3`.
-- **`LAG(col, N)`**: Get value from $N$ rows prior (default $N=1$).
-- **`LEAD(col, N)`**: Get value from $N$ rows after.
-
-### Common Frame Clauses
-- **Running Total** (Default when `ORDER BY` is present):
-  ```sql
-  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-  ```
-- **Moving Average** (e.g., 7-day average):
-  ```sql
-  ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-  ```
-
----
-
-## Common Table Expressions (CTEs)
-
-### Standard CTE Template
-```sql
-WITH cte_name AS (
-    SELECT col FROM table WHERE condition
-)
-SELECT * FROM cte_name;
-```
-
-### Recursive CTE Template
+## 4. Recursive CTEs
 ```sql
 WITH RECURSIVE cte_name AS (
-    -- Anchor member
-    SELECT id, name, manager_id FROM employees WHERE manager_id IS NULL
+    SELECT ... -- 1. Base Case
     UNION ALL
-    -- Recursive member
-    SELECT e.id, e.name, e.manager_id 
-    FROM employees e INNER JOIN cte_name c ON e.manager_id = c.id
+    SELECT ... FROM cte_name WHERE ... -- 2. Recursive Step
 )
 SELECT * FROM cte_name;
 ```
 
----
+## 5. JSONB Operators (PostgreSQL)
+| Operator | Description | Example | Returns True For |
+| :--- | :--- | :--- | :--- |
+| `->` | Get JSON object/array (returns JSONB) | `'{"a":1}'::jsonb -> 'a'` | N/A (Returns `1`) |
+| `->>` | Get JSON text (returns Text) | `'{"a":1}'::jsonb ->> 'a'` | N/A (Returns `'1'`) |
+| `#>` | Get at path (returns JSONB) | `doc #> '{a, b}'` | N/A |
+| `#>>`| Get at path (returns Text) | `doc #>> '{a, b}'` | N/A |
+| `@>` | Contains (Right side inside Left) | `'{"a":1, "b":2}'::jsonb @> '{"a":1}'` | Indexable containment check. |
+| `?` | Key exists at top level | `'{"a":1, "b":2}'::jsonb ? 'b'` | Simple existence check. |
+| `?\|` | Any key exists | `'{"a":1}'::jsonb ?\| array['a', 'b']` | True (a exists). |
+| `?&` | All keys exist | `'{"a":1}'::jsonb ?& array['a', 'b']` | False (b is missing). |
 
-## MySQL DDL & Constraints
-
+## 6. Advanced Modification Patterns
+**UPSERT (Insert on Conflict)**
 ```sql
-CREATE TABLE table_name (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE,
-    age INT CHECK (age >= 18),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    parent_id INT,
-    FOREIGN KEY (parent_id) REFERENCES parent_table(id)
-        ON DELETE CASCADE -- Actions: CASCADE, SET NULL, RESTRICT
-);
+INSERT INTO table (id, val) VALUES (1, 100)
+ON CONFLICT (id) 
+DO UPDATE SET val = table.val + EXCLUDED.val; -- EXCLUDED is the proposed row
 ```
 
----
+**MERGE (PostgreSQL 15+)**
+```sql
+MERGE INTO target t USING source s ON t.id = s.id
+WHEN MATCHED AND s.is_deleted THEN DELETE
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT (id, val) VALUES (s.id, s.val);
+```
 
-## NULL Invariants
-- `col = NULL` or `col != NULL` $\implies$ **Always evaluates to UNKNOWN/FALSE** (use `IS NULL` or `IS NOT NULL`).
-- `COUNT(*)` $\implies$ Counts all rows (including NULL rows).
-- `COUNT(col)` $\implies$ Counts only rows where `col` is NOT NULL.
-- `SUM()`, `AVG()`, `MIN()`, `MAX()` $\implies$ **Ignore NULL values**.
-- `COALESCE(val1, val2, val3)` $\implies$ Returns the first non-null value.
+**DELETE RETURNING (CTE Pattern)**
+```sql
+WITH moved AS (
+    DELETE FROM source_table WHERE status = 'OLD' RETURNING *
+)
+INSERT INTO archive_table SELECT * FROM moved;
+```
+
+**Generate Series (Date Spines)**
+```sql
+SELECT day::date FROM generate_series('2023-01-01'::date, '2023-12-31'::date, '1 day'::interval) as day;
+```
