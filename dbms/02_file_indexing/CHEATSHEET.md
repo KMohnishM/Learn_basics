@@ -1,79 +1,81 @@
-# Cheat Sheet — File Structures & Indexing
+# PostgreSQL Indexing Cheatsheet
 
-## Slotted-Page Layout
+## 1. Index Types Overview
+
+| Index Type | Primary Use Case | Supported Operators | Pros | Cons |
+| :--- | :--- | :--- | :--- | :--- |
+| **B-Tree** (Default) | Equality, Range, Sorting | `=`, `<`, `>`, `<=`, `>=`, `BETWEEN`, `IN` | Versatile, fast for ordered data | Write amplification on splits |
+| **Hash** | Pure Equality | `=` | O(1) lookups, crash-safe (PG10+) | Cannot do range queries or sorting |
+| **GiST** | Geometry, Text Search, Ranges | `<<`, `>>`, `&&`, `@>`, `<@`, `~` | Highly extensible, 2D/3D capable | Slower read performance than B-Tree |
+| **GIN** | Arrays, JSONB, Full Text | `@>`, `<@`, `?`, `?&`, `?\|` | Inverted indexing, incredibly fast reads | Slower updates, high maintenance overhead |
+| **BRIN** | Very large, naturally ordered tables | `=`, `<`, `>`, `<=`, `>=` | Tiny size, zero maintenance overhead | Coarse filtering, requires heap scans |
+
+## 2. B-Tree Math and Height
+
+*   **Page Size (Block):** 8192 bytes (8KB) default.
+*   **Branching Factor (b):** Number of children per node. `b ≈ (PageSize / KeySize)`.
+*   **Max Tuples per Page (Heap):** ≈ 290 (due to header overhead and alignment).
+*   **B-Tree Height Formula:** $h = \log_b(N)$ where $N$ is total rows.
+*   **Cost of B-Tree Lookup:** $O(h)$ page reads.
+
+## 3. Index Design Rules
+
+1.  **Equality Precedes Range:** `(A, B)` is correct for `WHERE A = 1 AND B > 2`.
+2.  **High Cardinality First (for Equalities):** If both are `=`, place the column with more unique values first to prune the tree faster.
+3.  **Covering Indexes for Performance:** Use `INCLUDE` to append payload data. `CREATE INDEX idx ON tbl (key) INCLUDE (payload);` enables Index-Only Scans.
+4.  **Avoid Indexing Booleans:** Full indexes on low-cardinality flags are ignored. Use partial indexes: `CREATE INDEX idx_active ON tbl (id) WHERE active = true;`.
+5.  **Correlated Data:** Use BRIN for time-series append-only tables to save space.
+
+## 4. Query Planner Nodes (EXPLAIN)
+
+| Node Name | Description | Cost / I/O Profile |
+| :--- | :--- | :--- |
+| **Seq Scan** | Reads entire table block by block | High volume, fast sequential I/O |
+| **Index Scan** | Traverses index, fetches heap tuple | Low volume, slow random I/O |
+| **Index Only Scan**| Reads only index, checks Visibility Map | Lowest volume, avoids heap fetch |
+| **Bitmap Index Scan**| Scans index, builds in-memory page bitmap | Translates random to sequential I/O |
+| **Bitmap Heap Scan** | Reads heap using bitmap from previous step | Efficient for moderate data retrieval |
+| **Nested Loop** | For each outer row, scans inner relation | Best for small outer, indexed inner |
+| **Hash Join** | Builds hash table, probes with outer | Best for large, unsorted sets (needs RAM)|
+| **Merge Join** | Zips two sorted inputs | Best when inputs are already sorted |
+
+## 5. VACUUM vs ANALYZE
+
+| Command | Primary Function | Modifies Data File? | Updates Statistics? |
+| :--- | :--- | :--- | :--- |
+| **VACUUM** | Marks dead tuples (MVCC) as free space | No (unless VACUUM FULL) | No |
+| **ANALYZE** | Samples data to update planner statistics | No | Yes (`pg_statistic`) |
+| **VACUUM ANALYZE**| Does both concurrently | No | Yes |
+
+*Rule of thumb:* Run ANALYZE after bulk inserts/updates to fix bad planner estimates.
+
+## 6. Crucial pg_stat Queries
+
+**Find Unused Indexes (Candidate for drop):**
+```sql
+SELECT
+    schemaname || '.' || relname AS table,
+    indexrelname AS index,
+    pg_size_pretty(pg_relation_size(i.indexrelid)) AS size,
+    idx_scan AS scans
+FROM pg_stat_user_indexes i
+JOIN pg_index USING (indexrelid)
+WHERE idx_scan = 0 AND indisunique IS FALSE
+ORDER BY pg_relation_size(i.indexrelid) DESC;
 ```
-┌────────────────────────────────────────────────────────┐
-│ Page Header                                            │
-├────────────────────────────────────────────────────────┤
-│ Slot Directory (offset, length)                        │
-│   ├── Slot 0  ──┐ (grows downwards)                    │
-│   └── Slot 1  ──┼┐                                     │
-├─────────────────┼┼─────────────────────────────────────┤
-│                 ▼▼    ◄── FREE SPACE ──►               │
-├────────────────────────────────────────────────────────┤
-│   Record 1 ◄────┘ (grows upwards)                      │
-├────────────────────────────────────────────────────────┤
-│   Record 0 ◄────┘                                      │
-└────────────────────────────────────────────────────────┘
+
+**Find Cache Hit Ratio (Should be >99% in memory):**
+```sql
+SELECT
+    sum(heap_blks_read) as heap_read,
+    sum(heap_blks_hit)  as heap_hit,
+    sum(heap_blks_hit) / (sum(heap_blks_hit) + sum(heap_blks_read)) as ratio
+FROM pg_statio_user_tables;
 ```
 
----
-
-## B+ Tree Occupancy Rules
-
-Let $p$ = max child pointers (non-leaf order), $p_{leaf}$ = max keys/data pointers (leaf order).
-
-| Node Type | Minimum Keys | Maximum Keys | Minimum Pointers | Maximum Pointers |
-|-----------|--------------|--------------|------------------|------------------|
-| **Root (Non-Leaf)** | 1 | $p - 1$ | 2 | $p$ |
-| **Non-Leaf** | $\lceil p/2 \rceil - 1$ | $p - 1$ | $\lceil p/2 \rceil$ | $p$ |
-| **Leaf** | $\lceil p_{leaf}/2 \rceil$ | $p_{leaf}$ | — | — |
-
----
-
-## B+ Tree Calculations
-
-### Max Node Order Formulas
-Given block size $B$, key size $V$, child pointer size $P$, and data pointer size $P_r$:
-
-- **Non-Leaf Node Max Order ($p$):**
-  $$p \cdot P + (p - 1) \cdot V \le B \implies p \le \frac{B + V}{P + V}$$
-
-- **Leaf Node Max Order ($p_{leaf}$):**
-  $$p_{leaf} \cdot V + p_{leaf} \cdot P_r + P \le B \implies p_{leaf} \le \frac{B - P}{P_r + V}$$
-  *(Note: $P$ represents the pointer to the next leaf node).*
-
-### Tree Height Limits ($h$)
-To store $N$ records in a B+ Tree:
-
-- **Minimum Height ($h_{min}$):**
-  $$h_{min} = \lceil \log_{p}(N / p_{leaf}) \rceil + 1$$
-  *(Assumes all nodes are 100% full).*
-
-- **Maximum Height ($h_{max}$):**
-  $$h_{max} = \lceil \log_{\lceil p/2 \rceil} (N / (2 \cdot \lceil p_{leaf}/2 \rceil)) \rceil + 2$$
-  *(Assumes all nodes are at minimum 50% occupancy).*
-
----
-
-## Index Scan Patterns in MySQL
-
-| Type | EXPLAIN Name | I/O Pattern | Best For |
-|------|--------------|-------------|----------|
-| **Full Table Scan** | `ALL` | Sequential reads of entire table | Scanning table, small tables, unmatched queries |
-| **Index Scan** | `index` | Sequential scan of index leaf nodes | Sorting, queries covered entirely by index |
-| **Index Only Scan** | `Using index` (Extra) | Reads index leaves ONLY (zero data file reads) | Covering indexes (extremely fast) |
-| **Range Scan** | `range` | Traverse index to start key, scan leaf chain | `BETWEEN`, `>`, `<` queries on indexed keys |
-| **Point Lookup** | `const` / `eq_ref` | Traverse index path directly to leaf | Unique key searches (3-4 I/Os) |
-
----
-
-## Split and Merge Rules
-
-### Node Splits (Overflow)
-- **Leaf Split**: Split keys into $\lceil (p_{leaf}+1)/2 \rceil$ in left and rest in right. **Copy up** the smallest key of the right node to the parent.
-- **Non-Leaf Split**: Split keys. **Push up** the middle key to the parent (remove it from children).
-
-### Node Merges (Underflow)
-- **Borrowing (Redistribution)**: Take a key from a sibling node. Update parent routing key.
-- **Merging (Coalescing)**: Merge node with sibling. Delete separating key from parent. If parent underflows, repeat recursively.
+**Check Table Statistics (When was it last analyzed?):**
+```sql
+SELECT relname, last_vacuum, last_autovacuum, last_analyze, last_autoanalyze
+FROM pg_stat_user_tables
+WHERE relname = 'your_table_name';
+```
