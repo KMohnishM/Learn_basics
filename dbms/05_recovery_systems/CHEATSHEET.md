@@ -1,69 +1,74 @@
-# Cheat Sheet — Recovery Systems
+# CHEATSHEET: Database Recovery & Replication
 
-## Write-Ahead Logging (WAL) Rules
-1. **Log Before Page**: Write the update log record to disk *before* writing the modified database page to disk.
-2. **Flush on Commit**: A transaction is committed only when its `COMMIT` log record is safely flushed to disk.
+## 1. Core WAL Settings (postgresql.conf)
 
----
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `wal_level` | `replica` | Controls WAL detail. `minimal` (no replication), `replica` (streaming rep), `logical` (logical rep). |
+| `fsync` | `on` | Must be `on` for ACID durability. Forces OS to flush WAL to physical disk. |
+| `synchronous_commit` | `on` | Determines when commit is acknowledged. Options: `on`, `off`, `local`, `remote_write`, `remote_apply`. |
+| `wal_buffers` | `-1` | Memory for unwritten WAL. Usually auto-tuned based on `shared_buffers`. |
 
-## Database Modification Schemes
+## 2. Checkpoint Settings (postgresql.conf)
 
-| Feature | Deferred Modification (No-Undo/Redo) | Immediate Modification (Undo/Redo) |
-|---------|--------------------------------------|------------------------------------|
-| **When are writes to disk allowed?** | Only after commit | At any time (even before commit) |
-| **Recovery action on crash** | **REDO** committed transactions. Ignore uncommitted. | **REDO** committed. **UNDO** uncommitted. |
-| **Log record values needed** | New value only (`<T_i, X, new_value>`) | Both old and new (`<T_i, X, old, new>`) |
-| **Buffer Management** | Simple (no stealing) | Complex (allows page steal) |
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `checkpoint_timeout` | `5min` | Max time between automatic checkpoints. Higher = slower recovery, better performance. |
+| `max_wal_size` | `1GB` | Triggers a checkpoint if WAL volume exceeds this before timeout. |
+| `checkpoint_completion_target` | `0.9` | Paces checkpoint I/O over 90% of the timeout interval to prevent disk I/O storms. |
 
----
+## 3. ARIES Recovery Phases
 
-## Checkpoint Recovery Sets
-
-Given a crash, locate the last `<checkpoint L>`:
-- **Redo-list**: Transactions that committed *after* the checkpoint and *before* the crash.
-- **Undo-list**: Transactions active during checkpoint ($L$) or started after checkpoint, but not committed before the crash.
-
----
-
-## ARIES Recovery Phases
-
-```
-  Checkpoint               Crash
-      │                      │
-      ▼                      ▼
-  ───[ ANALYSIS ]───────────►   (Scan forward: find active transactions & dirty pages)
-             │
-             ▼ (from min recLSN in DPT)
-  ──────────[ REDO ]────────►   (Scan forward: repeat all history)
-                             │
-                             ▼ (from end of log)
-  ◄─────────[ UNDO ]─────────   (Scan backward: rollback active "loser" transactions)
+```mermaid
+graph LR
+    A[CRASH] --> B[1. Analysis]
+    B -->|Find active TXNs & dirty pages| C[2. REDO]
+    C -->|Repeat history forward| D[3. UNDO]
+    D -->|Rollback losers backward| E[ONLINE]
 ```
 
-### 1. Analysis Phase
-- Start: Last checkpoint record.
-- Scan direction: **Forward** to the end of the log.
-- Output: Transaction Table (active transactions) and Dirty Page Table (pages with modifications not flushed).
+## 4. pg_dump Formats (`-F` flag)
 
-### 2. Redo Phase
-- Start: Oldest `recLSN` in the Dirty Page Table.
-- Scan direction: **Forward** to the end of the log.
-- Action: Reapply all changes (both committed and to-be-aborted transactions). **Skip** if PageLSN on disk ≥ LSN of log record (already persisted).
+| Format | Flag | Description |
+| :--- | :--- | :--- |
+| Plain Text | `-F p` | Raw SQL script. Cannot be restored in parallel. (Default) |
+| Custom | `-F c` | Compressed binary format. Restorable via `pg_restore`. Supports parallel `-j`. |
+| Directory | `-F d` | Creates a directory with one file per table. Excellent for parallel dumps/restores. |
+| Tar | `-F t` | Uncompressed tarball. Rarely used over Custom/Directory. |
 
-### 3. Undo Phase
-- Start: End of the log.
-- Scan direction: **Backward** to the oldest active transaction start.
-- Action: Roll back changes of all "loser" transactions (active at crash).
+## 5. Vital Replication Queries
 
----
+**Check Streaming Replication Lag (Run on Primary):**
+```sql
+SELECT application_name, client_addr, state,
+       pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_in_bytes
+FROM pg_stat_replication;
+```
 
-## Shadow Paging vs. Log-Based Recovery
+**Monitor Replication Slots (Run on Primary):**
+```sql
+SELECT slot_name, plugin, slot_type, active,
+       pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS retained_wal_bytes
+FROM pg_replication_slots;
+```
 
-- **Shadow Paging**:
-  - *How*: Dual page tables (Current & Shadow). Copy-on-Write for updates. Swap pointers on commit.
-  - *Pros*: Simple rollback (discard current table). No log parsing.
-  - *Cons*: Causes massive page fragmentation (random I/O). Expensive page table swaps.
-- **Log-Based (WAL)**:
-  - *How*: Append-only sequential log. In-place database page updates.
-  - *Pros*: Sequential writes are fast. Pages stay clustered on disk.
-  - *Cons*: Complex recovery algorithms (ARIES) needed.
+## 6. synchronous_commit Levels
+
+| Level | Acknowledges Client When... | Tradeoff |
+| :--- | :--- | :--- |
+| `off` | Written to local RAM (WAL buffer) | HIGH risk of data loss on crash. Extremely fast. |
+| `local` | Written to local disk | Safe locally, but standby might not have data. |
+| `on` | Written to standby disk | Zero RPO. High latency (waits for network + standby disk). |
+| `remote_write` | Written to standby OS cache | Medium latency. Survives primary crash, fails on double OS crash. |
+| `remote_apply` | Applied to standby database | Highest latency. Guarantees queries on standby see the data immediately. |
+
+## 7. PITR (Point-In-Time Recovery) Steps in 60s
+
+1. **Stop** the broken primary database.
+2. **Delete** the `/data` directory contents (keep `/pg_wal` if needed).
+3. **Restore** the latest `pg_basebackup` physical backup to `/data`.
+4. **Touch** an empty file: `touch /data/recovery.signal`.
+5. **Configure** `postgresql.conf`:
+   - `restore_command = 'cp /wal_archive/%f %p'`
+   - `recovery_target_time = 'YYYY-MM-DD HH:MM:SS'`
+6. **Start** the database. It will replay WAL and stop exactly at the target time.
