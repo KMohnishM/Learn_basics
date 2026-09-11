@@ -1,82 +1,62 @@
-# Cheat Sheet — Transactions & ACID Semantics
+# Database Transactions Cheatsheet
 
-## Transaction States
-```
-          ┌───────────────► Partially Committed ────────► Committed (End)
-          │                       │
-       (Begin)                    │ (Log flush fails)
-          │                       ▼
-        Active ──────────────► Failed
-          │                       │
-          │ (Abort/Error)         │
-          └───────────────► Aborted (Rollback) ─────────► (End)
-```
+## ACID Properties
 
----
+| Property | Description | Goal |
+| :--- | :--- | :--- |
+| **Atomicity** | All operations within a transaction succeed, or none do. | Prevent partial updates (all-or-nothing). |
+| **Consistency** | The database remains in a valid state before and after the transaction. | Enforce constraints, triggers, and rules. |
+| **Isolation** | Concurrent transactions behave as if executed sequentially. | Prevent interference between concurrent tasks. |
+| **Durability** | Committed changes are permanent, surviving system crashes. | Ensure data is safely written to disk. |
 
-## ACID Invariants
-- **Atomicity**: "All-or-Nothing." Implemented by **Recovery Manager** (Undo/Redo logs).
-- **Consistency**: Invariants preserved. Implemented by **application developer** + DB constraints.
-- **Isolation**: Concurrent execution $\equiv$ Serial. Implemented by **Concurrency Control** (locks, MVCC).
-- **Durability**: Committed data survives crashes. Implemented by **Recovery Manager** (WAL + disk flush).
+## Concurrency Anomalies
 
----
+| Anomaly | Description | Example Scenario |
+| :--- | :--- | :--- |
+| **Dirty Read** | Reading data written by an uncommitted transaction. | TX1 reads balance updated by TX2, TX2 rolls back. |
+| **Non-Repeatable Read** | Reading the same row twice yields different results. | TX1 reads row, TX2 updates row & commits, TX1 reads again. |
+| **Phantom Read** | Re-executing a query yields a different set of rows. | TX1 counts rows, TX2 inserts a new row & commits, TX1 counts again. |
+| **Write Skew** | Disjoint updates based on overlapping reads violate constraints. | TX1 & TX2 check constraint, both update different rows, breaking constraint. |
+| **Lost Update** | Overwriting an uncommitted change based on stale read. | TX1 & TX2 read value, TX1 updates, TX2 updates overwriting TX1. |
 
-## Read/Write Concurrency Anomalies
+## Isolation Levels (Standard vs PostgreSQL)
 
-- **Dirty Read**: $T_2$ reads data written by uncommitted $T_1$. If $T_1$ aborts, $T_2$'s read is invalid.
-  $$w_1(X) \rightarrow r_2(X) \rightarrow \text{Abort}(T_1)$$
-- **Non-Repeatable Read**: $T_1$ reads $X$, $T_2$ overwrites and commits, $T_1$ reads $X$ again and gets different value.
-  $$r_1(X) \rightarrow w_2(X) \rightarrow \text{Commit}(T_2) \rightarrow r_1(X)$$
-- **Phantom Read**: $T_1$ reads range of rows, $T_2$ inserts a new row in range and commits, $T_1$ reads range again and gets new row.
-  $$r_1(\text{range } X) \rightarrow \text{Insert}_2(Y \in X) \rightarrow \text{Commit}(T_2) \rightarrow r_1(\text{range } X)$$
-- **Lost Update**: $T_1$ and $T_2$ read $X$, both write updates, second write overwrites first write.
-  $$r_1(X) \rightarrow r_2(X) \rightarrow w_1(X) \rightarrow w_2(X)$$
+| Isolation Level | Dirty Read | Non-Repeatable Read | Phantom Read | Serialization Anomaly |
+| :--- | :--- | :--- | :--- | :--- |
+| **Read Uncommitted** | Allowed *(PG Prevents)* | Allowed | Allowed | Allowed |
+| **Read Committed** (Default) | Prevented | Allowed | Allowed | Allowed |
+| **Repeatable Read** | Prevented | Prevented | Allowed *(PG Prevents)* | Allowed |
+| **Serializable** | Prevented | Prevented | Prevented | Prevented |
 
----
+## Explicit Locking Modes (Row Level)
 
-## SQL Isolation Levels (ANSI SQL-92)
+| Lock Mode | Usage | Conflicts With |
+| :--- | :--- | :--- |
+| **FOR UPDATE** | Full exclusive lock for UPDATE/DELETE. | FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE, FOR KEY SHARE |
+| **FOR NO KEY UPDATE** | Exclusive lock, but no primary key changes. | FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE |
+| **FOR SHARE** | Shared lock, reading data, preventing updates. | FOR UPDATE, FOR NO KEY UPDATE |
+| **FOR KEY SHARE** | Weak shared lock, validating foreign keys. | FOR UPDATE |
 
-| Isolation Level | Dirty Read | Non-Repeatable Read | Phantom Read | Lost Update |
-|-----------------|:----------:|:-------------------:|:------------:|:-----------:|
-| **Read Uncommitted**| Allowed | Allowed | Allowed | Allowed |
-| **Read Committed**  | ❌ | Allowed | Allowed | Allowed |
-| **Repeatable Read** | ❌ | ❌ | Allowed | ❌ |
-| **Serializable**    | ❌ | ❌ | ❌ | ❌ |
+## Explicit Locking Modes (Table Level Examples)
 
----
+| Lock Mode | Acquired By (Implicitly) | Conflicts With |
+| :--- | :--- | :--- |
+| **ACCESS SHARE** | SELECT | ACCESS EXCLUSIVE |
+| **ROW EXCLUSIVE** | UPDATE, DELETE, INSERT | SHARE, SHARE ROW EXCLUSIVE, EXCLUSIVE, ACCESS EXCLUSIVE |
+| **ACCESS EXCLUSIVE** | DROP TABLE, TRUNCATE, ALTER TABLE | ALL OTHER LOCK MODES |
 
-## Serializability Checks
+## Deadlock Rules & Prevention
 
-### Conflict Serializability (Precedence Graph)
-Draw directed graph: vertices = transactions.
-Draw edge $T_i \rightarrow T_j$ if $T_i$ executes operation conflicting with subsequent operation of $T_j$:
-- $r_i(X) \rightarrow w_j(X)$
-- $w_i(X) \rightarrow r_j(X)$
-- $w_i(X) \rightarrow w_j(X)$
+1.  **Consistent Ordering:** Always acquire locks on multiple resources in the exact same alphabetical or logical order across all application code.
+2.  **Short Transactions:** Keep transaction blocks as brief as possible.
+3.  **No User Input:** Never wait for user interaction while holding a transaction open.
+4.  **Appropriate Isolation:** Use Read Committed unless stricter guarantees are explicitly required.
+5.  **Detect & Retry:** Ensure application code catches `ERROR: deadlock detected` (SQLSTATE 40P01) and retries the transaction.
 
-**Acyclic Graph** $\implies$ Conflict Serializable. Topological sort order = Equivalent Serial Schedule.
-**Cyclic Graph** $\implies$ Not Conflict Serializable.
+## MVCC (Multiversion Concurrency Control) Basics
 
-### View Serializability
-Schedules $S_1$ and $S_2$ are view equivalent if:
-1. **Initial Read**: $T_i$ reads initial value of $X$ in $S_1 \iff T_i$ reads initial value in $S_2$.
-2. **Write-Read**: $T_i$ writes $X$ and $T_j$ reads that value in $S_1 \iff T_i$ writes $X$ and $T_j$ reads that value in $S_2$.
-3. **Final Write**: $T_i$ does final write of $X$ in $S_1 \iff T_i$ does final write of $X$ in $S_2$.
-
-*Shortcut*: If conflict serializable, it is view serializable. If not conflict serializable, it can only be view serializable if it contains a **blind write** (write without read).
-
----
-
-## Schedule Recoverability
-
-- **Recoverable**: If $T_j$ reads from $T_i$, then $T_i$ must commit before $T_j$ commits:
-  $$w_i(X) \rightarrow r_j(X) \implies Commit(T_i) < Commit(T_j)$$
-- **Cascadeless (ACA)**: If $T_j$ reads from $T_i$, then $T_i$ must commit before $T_j$ reads:
-  $$w_i(X) \rightarrow r_j(X) \implies Commit(T_i) < r_j(X)$$
-- **Strict**: If $T_i$ writes $X$, no other transaction can read or write $X$ until $T_i$ commits/aborts:
-  $$w_i(X) \rightarrow \text{operation}_j(X) \implies Commit(T_i) < \text{operation}_j(X) \quad (\text{operation is } r \text{ or } w)$$
-
-```
-Strict ⊂ Cascadeless (ACA) ⊂ Recoverable
-```
+*   **Writers do not block readers.**
+*   **Readers do not block writers.**
+*   Each row has `xmin` (creating transaction ID) and `xmax` (deleting transaction ID).
+*   Transactions only see rows where `xmin` is committed and `xmax` is either uncommitted, aborted, or NULL.
+*   Requires `VACUUM` to physically remove dead tuples (rows where `xmax` is committed and no longer visible to any snapshot).
