@@ -1,99 +1,86 @@
-# Cheat Sheet — Concurrency Control
+# Concurrency Control Cheatsheet
 
-## Lock Compatibility Matrix
-```
-          Requested Lock
-            ┌─────┬─────┐
-            │  S  │  X  │
-      ┌─────┼─────┼─────┤
-      │  S  │  Y  │  N  │   (Y = Compatible/Granted,
-Held  ├─────┼─────┼─────┤    N = Conflict/Wait)
-Lock  │  X  │  N  │  N  │
-      └─────┴─────┴─────┘
-```
+## 1. Lock Compatibility Matrix
 
----
+| Lock Type | Shared (S) | Exclusive (X) | Intent Shared (IS) | Intent Exclusive (IX) | Shared + Intent Exclusive (SIX) |
+|---|---|---|---|---|---|
+| **Shared (S)** | Compatible | Incompatible | Compatible | Incompatible | Incompatible |
+| **Exclusive (X)** | Incompatible | Incompatible | Incompatible | Incompatible | Incompatible |
+| **Intent Shared (IS)** | Compatible | Incompatible | Compatible | Compatible | Compatible |
+| **Intent Exclusive (IX)**| Incompatible | Incompatible | Compatible | Compatible | Incompatible |
+| **SIX** | Incompatible | Incompatible | Compatible | Incompatible | Incompatible |
 
-## Multiple-Granularity Locking (Intention Locks)
+## 2. MVCC Tuple Visibility Rules
 
-Real DBMS engines support **multiple lock granularities** (Database → Table → Page → Row). To lock a row, you must also signal intent on the parent objects using **Intention Locks**:
+PostgreSQL uses system columns (`xmin`, `xmax`, `cmin`, `cmax`) to handle visibility. 
 
-| Lock | Name | Meaning |
-|:----:|------|---------|
-| **IS** | Intention Shared | Intend to set S lock on a child |
-| **IX** | Intention Exclusive | Intend to set X lock on a child |
-| **S** | Shared | Lock entire subtree shared |
-| **SIX** | Shared + Intention Exclusive | S on subtree + IX on some children |
-| **X** | Exclusive | Lock entire subtree exclusive |
+*   **`xmin`**: The ID of the transaction that inserted the row.
+*   **`xmax`**: The ID of the transaction that deleted or updated the row (0 if not deleted).
 
-**Compatibility Matrix (IS / IX / S / SIX / X):**
-```
-         IS   IX    S   SIX   X
-IS    [  Y    Y    Y    Y    N ]
-IX    [  Y    Y    N    N    N ]
-S     [  Y    N    Y    N    N ]
-SIX   [  Y    N    N    N    N ]
-X     [  N    N    N    N    N ]
-```
-**Rule**: To lock node $N$ at granularity $G$, the transaction must acquire IS/IX locks on all ancestors of $N$ (from root down to $N$'s parent).
+**Visibility Condition (Simplified):**
+A tuple is visible to a transaction if:
+1.  `xmin` is committed and `xmin` < `snapshot_xmax`.
+2.  `xmax` is 0, OR `xmax` is aborted, OR `xmax` >= `snapshot_xmax`.
 
+## 3. VACUUM Operations
 
+| Command | Purpose | Locks Acquired | Disk Space Reclaimed to OS | Updates Statistics |
+|---|---|---|---|---|
+| `VACUUM` | Marks dead tuples as free space for future inserts/updates. | `SHARE UPDATE EXCLUSIVE` (Allows concurrent reads/writes) | No | No |
+| `VACUUM ANALYZE` | Same as `VACUUM`, but also updates planner statistics. | `SHARE UPDATE EXCLUSIVE` | No | Yes |
+| `VACUUM FULL` | Rewrites the entire table, removing dead space completely. | `ACCESS EXCLUSIVE` (Blocks all access) | Yes | No |
 
-**Core Rule**: No lock can be acquired after any lock is released.
+## 4. PgBouncer Pool Modes
 
-| 2PL Variation | Exclusive (X) Locks | Shared (S) Locks | Avoids Cascade Aborts? |
-|---------------|---------------------|------------------|:----------------------:|
-| **Basic 2PL** | Released during shrinking phase | Released during shrinking phase | ❌ No |
-| **Strict 2PL** | Held until commit/abort | Released during shrinking phase | ✅ Yes |
-| **Rigorous 2PL** | Held until commit/abort | Held until commit/abort | ✅ Yes |
+| Mode | Description | Best For | Limitations |
+|---|---|---|---|
+| **Session** | Client holds a server connection for the entire session. | Legacy apps expecting dedicated connections. | Very low scalability. Defeats the purpose of pooling for large scale. |
+| **Transaction**| Client gets a connection only for the duration of a transaction. | High-concurrency web apps, microservices. | Cannot use session-level features (prepared statements without special config, advisory locks, `SET LOCAL`). |
+| **Statement** | Client gets a connection for a single statement. | Extreme concurrency with short reads. | Multi-statement transactions are not allowed. |
 
-- **Conservative 2PL**: Acquire *all* locks before execution. **Deadlock-free**.
+## 5. Useful Monitoring Queries
 
----
-
-## Timestamp-Ordering Protocol
-
-Let $TS(T_i)$ = transaction timestamp, $W-TS(X)$ = write timestamp of $X$, $R-TS(X)$ = read timestamp of $X$.
-
-### Read Rule (for $r_i(X)$):
-- If $TS(T_i) < W-TS(X)$ $\implies$ **Abort & Restart** (reading overwritten data).
-- Else $\implies$ **Allow**. Update: $R-TS(X) = \max(R-TS(X), TS(T_i))$.
-
-### Write Rule (for $w_i(X)$):
-- If $TS(T_i) < R-TS(X)$ $\implies$ **Abort & Restart** (writing data already read by newer trans).
-- If $TS(T_i) < W-TS(X)$ $\implies$:
-  - *Standard*: **Abort & Restart**.
-  - *Thomas' Write Rule*: **Ignore write** and continue (obsolete write skipped).
-- Else $\implies$ **Allow**. Update: $W-TS(X) = TS(T_i)$.
-
----
-
-## Deadlock Prevention Protocols
-
-Older transaction = smaller timestamp. Let requesting transaction be $T_{\text{req}}$, lock holder be $T_{\text{held}}$.
-
-### Wait-Die (Non-Preemptive)
-```
-If TS(T_req) < TS(T_held)  [Older requests younger]  →  T_req WAITS
-If TS(T_req) > TS(T_held)  [Younger requests older]  →  T_req DIES (Aborts)
+### XID Age Monitoring (Prevent Wraparound)
+```sql
+SELECT datname, age(datfrozenxid) AS xid_age,
+       pg_size_pretty(pg_database_size(datname)) AS db_size
+FROM pg_database
+ORDER BY xid_age DESC;
 ```
 
-### Wound-Wait (Preemptive)
+### Deadlock and Blocked Query Monitoring
+```sql
+SELECT
+  blocked.pid AS blocked_pid,
+  blocked.query AS blocked_query,
+  blocking.pid AS blocking_pid,
+  blocking.query AS blocking_query
+FROM pg_stat_activity blocked
+JOIN pg_stat_activity blocking
+  ON blocked.wait_event = blocking.pid::text
+WHERE blocked.wait_event_type = 'Lock';
 ```
-If TS(T_req) < TS(T_held)  [Older requests younger]  →  T_req WOUNDS T_held (Holder Aborts)
-If TS(T_req) > TS(T_held)  [Younger requests older]  →  T_req WAITS
+
+### Find Queries using `pg_blocking_pids`
+```sql
+SELECT pid, pg_blocking_pids(pid) AS blocking_pids, query
+FROM pg_stat_activity
+WHERE cardinality(pg_blocking_pids(pid)) > 0;
 ```
 
----
+## 6. Two-Phase Locking (2PL) Phases Diagram
 
-## MVCC Internals (InnoDB)
-
-Each row in InnoDB contains hidden columns:
-- `DB_TRX_ID` (6 bytes): Transaction ID of the last transaction that inserted/updated the row.
-- `DB_ROLL_PTR` (7 bytes): Pointer to the rollback segment in the **Undo Log** containing the previous version of the row.
-
-### Snapshot Read Rules (Read View)
-When a transaction reads $X$:
-- Under **READ COMMITTED**: A new Read View is generated for **each SELECT query**. Shows updates committed by other transactions mid-transaction.
-- Under **REPEATABLE READ**: A single Read View is generated when the **first SELECT runs**. All subsequent reads use this same snapshot, ensuring repeatable reads without lock overhead.
-- Reads never block writes; writes never block reads.
+```text
+Lock Count
+    ^
+    |       Phase 1 (Growing)           Phase 2 (Shrinking)
+    |      -------------------        ----------------------
+    |     /                   \      /                      \
+    |    /                     \    /                        \
+    |   /                       \  /                          \
+    |  /                         \/                            \
+    | /                          |                              \
+    |/                           |                               \
+    +---------------------------------------------------------------> Time
+                             Lock Point
+```
